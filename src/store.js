@@ -13,10 +13,12 @@ function empty() {
     tasks: [],
     // чек-ины: { date: 'YYYY-MM-DD', mood: 1-5, sleep: часы, load: 'light' | 'normal' | 'heavy' }
     checkins: [],
-    // эксперименты: { id, question, change, startDate, endDate,
+    // эксперименты: { id, question, change, startDate, endDate, notes: '',
     //   marks: [{ date, energy: 1-5, helped: 'yes' | 'no' | 'unsure' }],
     //   status: 'active' | 'finished', conclusion: 'keep' | 'change' | 'other' | null }
-    experiments: []
+    experiments: [],
+    // свои идеи для экспериментов: { id, title, change }
+    ideas: []
   }
 }
 
@@ -25,14 +27,38 @@ function load() {
   const base = empty()
   try {
     const saved = JSON.parse(localStorage.getItem(KEY))
-    if (!saved || typeof saved !== 'object') return base
-    for (const k of ['lessons', 'tasks', 'checkins', 'experiments']) {
-      if (Array.isArray(saved[k])) base[k] = saved[k]
+    if (saved && typeof saved === 'object') {
+      for (const k of ['lessons', 'tasks', 'checkins', 'experiments', 'ideas']) {
+        if (Array.isArray(saved[k])) base[k] = saved[k]
+      }
     }
-    return base
-  } catch (e) {
-    return base
-  }
+  } catch (e) {}
+  moveOldExperimentData(base)
+  return base
+}
+
+// раньше заметки и идеи эксперимента лежали в отдельных ключах, забираем их к себе один раз
+function moveOldExperimentData(base) {
+  try {
+    const notes = JSON.parse(localStorage.getItem('ritm_experiment_notes_v1'))
+    const ideas = JSON.parse(localStorage.getItem('ritm_experiment_ideas_v1'))
+    if (!notes && !ideas) return
+    if (notes && typeof notes === 'object') {
+      for (const e of base.experiments) {
+        if (!e.notes && notes[e.id]) e.notes = String(notes[e.id])
+      }
+    }
+    if (Array.isArray(ideas)) {
+      for (const i of ideas) {
+        if (i && i.title && i.change && !base.ideas.some(x => x.change === i.change)) {
+          base.ideas.push({ id: i.id || uid(), title: i.title, change: i.change })
+        }
+      }
+    }
+    localStorage.setItem(KEY, JSON.stringify(base))
+    localStorage.removeItem('ritm_experiment_notes_v1')
+    localStorage.removeItem('ritm_experiment_ideas_v1')
+  } catch (e) {}
 }
 
 export const state = reactive(load())
@@ -104,7 +130,7 @@ export function saveCheckin(c) {
 export function getCheckin(date) { return state.checkins.find(c => c.date === date) || null }
 
 export function addExperiment(e) {
-  const exp = { id: uid(), marks: [], status: 'active', conclusion: null, ...e }
+  const exp = { id: uid(), notes: '', marks: [], status: 'active', conclusion: null, ...e }
   state.experiments.push(exp)
   return exp.id
 }
@@ -119,6 +145,18 @@ export function finishExperiment(id, conclusion) {
   const e = state.experiments.find(x => x.id === id)
   if (e) { e.status = 'finished'; e.conclusion = conclusion }
 }
+export function updateExperiment(id, patch) {
+  const e = state.experiments.find(x => x.id === id)
+  if (e) Object.assign(e, patch)
+}
+export function removeExperiment(id) { state.experiments = state.experiments.filter(e => e.id !== id) }
+
+export function addIdea(idea) {
+  const item = { id: uid(), title: '', change: '', ...idea }
+  state.ideas.push(item)
+  return item.id
+}
+export function removeIdea(id) { state.ideas = state.ideas.filter(i => i.id !== id) }
 
 export function exportData() { return JSON.stringify(state, null, 2) }
 export function clearAll() { Object.assign(state, empty()) }
@@ -202,11 +240,12 @@ export function fillDemo() {
     marks: [
       [0, 3, 'unsure'], [1, 4, 'yes'], [2, 2, 'no'], [4, 4, 'yes'], [5, 4, 'yes'], [6, 5, 'yes']
     ].map(([n, energy, helped]) => ({ date: addDays(start, n), energy, helped })),
+    notes: 'Первые два дня тяжело, потом привык. Утром правда бодрее',
     status: 'finished',
     conclusion: 'keep'
   }]
 
-  Object.assign(state, { lessons, tasks, checkins, experiments })
+  Object.assign(state, { lessons, tasks, checkins, experiments, ideas: [] })
 }
 
 function clamp(x, min, max) { return Math.min(max, Math.max(min, x)) }

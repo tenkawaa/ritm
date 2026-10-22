@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { state, addExperiment, addMark, finishExperiment, todayStr, addDays, parseDate } from '../store.js'
+import { state, addExperiment, addMark, finishExperiment, updateExperiment, removeExperiment, addIdea, removeIdea, todayStr, addDays, parseDate } from '../store.js'
 import BaseCard from '../components/BaseCard.vue'
 import BaseButton from '../components/BaseButton.vue'
 import BaseChip from '../components/BaseChip.vue'
@@ -14,35 +14,13 @@ const presets = [
   { id: 'next', icon: '🧭', title: 'Оставить себе «что дальше»', description: 'Перед паузой записать следующий конкретный шаг.', change: 'Перед паузой запиши один следующий конкретный шаг.' },
   { id: 'custom', icon: '✏️', title: 'Свой вариант', description: 'Опиши коротко, что хочешь попробовать.', change: '' }
 ]
-const IDEAS_KEY = 'ritm_experiment_ideas_v1'
-const NOTES_KEY = 'ritm_experiment_notes_v1'
-
-function loadSavedNotes() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(NOTES_KEY) || '{}')
-    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}
-  } catch {
-    return {}
-  }
-}
-
-function loadSavedIdeas() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(IDEAS_KEY) || '[]')
-    return Array.isArray(saved) ? saved.filter(item => item && item.id && item.title && item.change) : []
-  } catch {
-    return []
-  }
-}
+const shortTitle = text => text.length > 48 ? `${text.slice(0, 45).trimEnd()}…` : text
 
 const step = ref(1)
 const selectedPreset = ref('')
 const question = ref('')
 const change = ref('')
 const customIdea = ref('')
-const experimentNotes = ref('')
-const savedIdeas = ref(loadSavedIdeas())
-const savedNotes = ref(loadSavedNotes())
 const duration = ref(7)
 const summaryId = ref('')
 const resultId = ref('')
@@ -52,6 +30,11 @@ const energy = ref(null)
 const helped = ref('')
 
 const activeExperiment = computed(() => state.experiments.find(item => item.status === 'active') || null)
+const savedIdeas = computed(() => state.ideas.map(idea => ({ ...idea, description: idea.change })))
+const experimentNotes = computed({
+  get: () => activeExperiment.value?.notes || '',
+  set: text => { if (activeExperiment.value) updateExperiment(activeExperiment.value.id, { notes: text }) }
+})
 const finishedResult = computed(() => state.experiments.find(item => item.id === resultId.value && item.status === 'finished') || null)
 const summaryExperiment = computed(() => activeExperiment.value || finishedResult.value)
 const pastExperiments = computed(() => state.experiments.filter(item => item.status === 'finished').slice().sort((a, b) => a.startDate.localeCompare(b.startDate)))
@@ -81,22 +64,10 @@ const splitObservation = computed(() => {
     : 'Отметок пока мало, чтобы сравнить дни между собой.'
 })
 
-watch(savedIdeas, ideas => {
-  try { localStorage.setItem(IDEAS_KEY, JSON.stringify(ideas)) } catch {}
-}, { deep: true })
-
-watch(() => activeExperiment.value?.id, id => {
-  experimentNotes.value = id ? String(savedNotes.value[id] || '') : ''
-}, { immediate: true })
-
 watch(customIdea, value => {
-  if (selectedPreset.value === 'custom') change.value = value
-})
-
-watch([experimentNotes, () => activeExperiment.value?.id], ([note, id]) => {
-  if (!id) return
-  savedNotes.value = { ...savedNotes.value, [id]: note }
-  try { localStorage.setItem(NOTES_KEY, JSON.stringify(savedNotes.value)) } catch {}
+  if (selectedPreset.value !== 'custom') return
+  change.value = value
+  question.value = shortTitle(value.trim())
 })
 
 watch(todayMark, mark => {
@@ -106,7 +77,7 @@ watch(todayMark, mark => {
 
 function choosePreset(preset) {
   selectedPreset.value = preset.id
-  question.value = preset.id === 'custom' ? 'Свой вариант' : preset.title
+  question.value = preset.id === 'custom' ? '' : preset.title
   change.value = preset.change || ''
   customIdea.value = preset.id === 'custom' ? '' : preset.change
 }
@@ -114,20 +85,18 @@ function choosePreset(preset) {
 function saveCurrentIdea() {
   const cleanChange = customIdea.value.trim()
   if (!cleanChange) return
-  const existing = savedIdeas.value.find(item => item.change === cleanChange)
-  if (existing) return
-  const title = cleanChange.length > 48 ? `${cleanChange.slice(0, 45).trimEnd()}…` : cleanChange
-  savedIdeas.value.push({ id: `idea-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, title, description: cleanChange, question: 'Свой вариант', change: cleanChange })
+  if (state.ideas.some(item => item.change === cleanChange)) return
+  addIdea({ title: shortTitle(cleanChange), change: cleanChange })
 }
 
 function deletePastExperiment(id) {
-  state.experiments = state.experiments.filter(item => !(item.id === id && item.status === 'finished'))
+  removeExperiment(id)
   if (resultId.value === id) resultId.value = ''
   pendingDeleteId.value = ''
 }
 
 function removeSavedIdea(id) {
-  savedIdeas.value = savedIdeas.value.filter(item => item.id !== id)
+  removeIdea(id)
   if (selectedPreset.value === id) selectedPreset.value = 'custom'
 }
 
@@ -190,7 +159,7 @@ function startExperiment() {
   if (!change.value.trim()) return
   if (selectedPreset.value === 'custom') saveCurrentIdea()
   addExperiment({
-    question: question.value.trim() || 'Свой вариант',
+    question: question.value.trim() || shortTitle(change.value.trim()),
     change: change.value.trim(),
     startDate: startDate.value,
     endDate: endDate.value
@@ -349,7 +318,7 @@ function startExperiment() {
               <p><strong>Пробовал:</strong> {{ item.change }}</p>
               <p>{{ helpedSummary(item) }} · средние силы {{ average(item.marks.map(mark => mark.energy)) }} из 5 по {{ item.marks.length }} отметкам</p>
               <p><strong>Решение:</strong> {{ conclusionLabel(item.conclusion) }}</p>
-              <p v-if="savedNotes[item.id]"><strong>Твои заметки:</strong> {{ savedNotes[item.id] }}</p>
+              <p v-if="item.notes"><strong>Твои заметки:</strong> {{ item.notes }}</p>
             </details>
             <div v-if="pendingDeleteId === item.id" class="delete-confirm">
               <span>Удалить эту заметку?</span>
