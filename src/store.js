@@ -18,7 +18,9 @@ function empty() {
     //   status: 'active' | 'finished', conclusion: 'keep' | 'change' | 'other' | null }
     experiments: [],
     // свои идеи для экспериментов: { id, title, change }
-    ideas: []
+    ideas: [],
+    // дела, убранные из плана на день: { date: 'YYYY-MM-DD', ids: [] }
+    planSkip: { date: '', ids: [] }
   }
 }
 
@@ -31,6 +33,7 @@ function load() {
       for (const k of ['lessons', 'tasks', 'checkins', 'experiments', 'ideas']) {
         if (Array.isArray(saved[k])) base[k] = saved[k]
       }
+      if (saved.planSkip && Array.isArray(saved.planSkip.ids)) base.planSkip = { date: String(saved.planSkip.date || ''), ids: saved.planSkip.ids }
     }
   } catch (e) {}
   moveOldExperimentData(base)
@@ -158,6 +161,11 @@ export function addIdea(idea) {
 }
 export function removeIdea(id) { state.ideas = state.ideas.filter(i => i.id !== id) }
 
+// «не сегодня» в плане дня, на следующий день само сбрасывается
+export function skippedToday() { return state.planSkip.date === todayStr() ? state.planSkip.ids : [] }
+export function skipForToday(id) { state.planSkip = { date: todayStr(), ids: [...skippedToday().filter(x => x !== id), id] } }
+export function unskipForToday(id) { state.planSkip = { date: todayStr(), ids: skippedToday().filter(x => x !== id) } }
+
 export function exportData() { return JSON.stringify(state, null, 2) }
 export function clearAll() { Object.assign(state, empty()) }
 
@@ -207,7 +215,7 @@ export function fillDemo() {
     task({ title: 'Лабораторная по программированию', minutes: 120, deadline: day(5) }),
     task({ title: 'Прочитать главу по матанализу', minutes: 60, deadline: day(3), firstStep: 'Найти главу и прочитать первую страницу' }),
     task({ title: 'Подготовиться к контрольной по английскому', minutes: 60, importance: 3, deadline: day(1), firstStep: 'Выписать 10 слов из прошлого урока' }),
-    task({ title: 'Смена в кофейне', minutes: 240, flexible: false, regular: true }),
+    task({ title: 'Созвон по командному проекту', minutes: 60, flexible: false, firstStep: 'Открыть вчерашние заметки' }),
     task({ title: 'Тренировка', minutes: 60, regular: true }),
     task({ title: 'Купить продукты', minutes: 30, importance: 1 }),
     task({ title: 'Сдать справку в деканат', minutes: 15, importance: 1, done: true })
@@ -245,7 +253,7 @@ export function fillDemo() {
     conclusion: 'keep'
   }]
 
-  Object.assign(state, { lessons, tasks, checkins, experiments, ideas: [] })
+  Object.assign(state, { lessons, tasks, checkins, experiments, ideas: [], planSkip: { date: '', ids: [] } })
 }
 
 function clamp(x, min, max) { return Math.min(max, Math.max(min, x)) }
